@@ -124,13 +124,6 @@ __global__ void elementwise_add_f16x8_kernel(half* a, half* b, half* c, int N){
     if ((idx + 4) < N) { HALF2(c[idx + 4]) = reg_c_2; }
     if ((idx + 6) < N) { HALF2(c[idx + 6]) = reg_c_3; }
 }
-/*
-为什么没有使用循环：
-1. 减少循环控制开销
-2. 提高指令级并行性
-3. 避免分支预测和线程发散
-4. 更好利用GPU计算资源
-*/
 
 
 // 以下函数通过将数值 pack 到列表中, 使用循环操作
@@ -152,7 +145,17 @@ __global__ void elementwise_add_f16x8_pack_kernel(half* a, half* b, half* c, int
     // 将输出强制转换为 float4 类型，并存储到 c[idx] 的地址中
     if((idx + 7) < N) { LDST128BITS(c[idx]) = LDST128BITS(pack_c[0]); }
 }
-
+/*
+该方法更快的原因：
+- 内存访问模式
+  - elementwise_add_f16x8_kernel 的内存访问,逐个叫在数据，每次加载指令分散的。
+  - elementwise_add_f16x8_pack_kernel 的内存访问，使用 128位的加载指令，128位的加载指令可以在一个内存访问中加载多个数据。属于向量化加载,可以充分利用GPU的内存带宽,减少内存访问指令的数量。
+- 循环展开与寄存器优化
+  - elementwise_add_f16x8_kernel：手动展开了 4 次 half2 的加法操作（reg_a_0, reg_a_1, reg_a_2, reg_a_3）。每次操作都需要单独的寄存器存储中间结果，寄存器使用量较高。
+  - elementwise_add_f16x8_pack_kernel：使用了一个局部数组 pack_a 和 pack_b，并通过循环处理 8 个 half 数据。
+    使用 #pragma unroll 指令展开循环，编译器会自动优化寄存器分配和指令调度。
+    循环展开后，寄存器使用量更低，指令调度更高效。
+*/
 
 // --------------------- PyTorch bindings for custom kernel -----------------------
 #define STRINGFY(str) #str // 将 str 转换为字符串 #str是一个预处理器指令，将 str 转换为字符串字面量
